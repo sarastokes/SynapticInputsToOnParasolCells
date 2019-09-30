@@ -4,6 +4,7 @@ classdef BipolarDistanceView < handle
         neuron
         analysis
         amacrineSynapseID
+        amacrineAnnotations
         amacrineXYZ
     end
 
@@ -12,6 +13,10 @@ classdef BipolarDistanceView < handle
         axesHandle
         
         currentSynapse
+    end
+
+    properties (Hidden, Constant)
+        NUM_BIPOLARS = 10;
     end
 
     methods 
@@ -50,6 +55,8 @@ classdef BipolarDistanceView < handle
                 'ZData', obj.amacrineXYZ(3));
             set(findobj(obj.figureHandle, 'Tag', 'AmacrineSynapseID'),...
                 'String', num2str(obj.amacrineSynapseID));
+            set(findobj(obj.figureHandle, 'Tag', 'NumLocations'),...
+                'String', [num2str(obj.amacrineAnnotations), ' locations']);
             
             obj.currentSynapse = 1;
             obj.show();
@@ -96,17 +103,33 @@ classdef BipolarDistanceView < handle
             X = volumeScale(1) * vertcat(data.VolumeX);
             Y = volumeScale(2) * vertcat(data.VolumeY);
             Z = volumeScale(3) * vertcat(data.Z);
+            obj.amacrineAnnotations = numel(X);
 
             if numel(X) > 1
-                warning('%u has %u locations!', obj.amacrineSynapseID, numel(X));
-                X = mean(X); Y = mean(Y); Z = mean(Z);
+                fprintf('\t%u has %u locations.\n', obj.amacrineSynapseID, numel(X));
+                obj.amacrineXYZ = [mean(X), mean(Y), mean(Z)];
+                % X = mean(X); Y = mean(Y); Z = mean(Z);
+            else
+                obj.amacrineXYZ = [X, Y, Z];
             end
-            obj.amacrineXYZ = [X, Y, Z];
+            
+            % Get the minimum distances per AC annotation
+            allDistances = []; allInd = [];
+            for i = 1:numel(X)
+                distances = fastEuclid3d([X(i), Y(i), Z(i)], bipolars.XYZum);
+                [distances, ind] = mink(distances, obj.NUM_BIPOLARS);
 
-            allDistances = fastEuclid3d([X, Y, Z], bipolars.XYZum);
-            [distances, ind] = mink(allDistances, 5);
-            obj.analysis = table(bipolars{ind, 'ID'}, bipolars{ind, 'ParentID'},...
-                bipolars{ind, 'XYZum'}, distances,...
+                allDistances = cat(1, allDistances, distances);
+                allInd = cat(1, allInd, ind);
+            end
+
+            % Get the minimum distances across all AC annotations
+            [distances, ind] = mink(allDistances, obj.NUM_BIPOLARS);
+            bipolarInd = allInd(ind);
+
+            obj.analysis = table(...
+                bipolars{bipolarInd, 'ID'}, bipolars{bipolarInd, 'ParentID'}, ...
+                bipolars{bipolarInd, 'XYZum'}, distances, ...
                 'VariableNames', {'LocationID', 'BipolarID', 'BipolarXYZ', 'Distance'});
         end
         
@@ -161,6 +184,10 @@ classdef BipolarDistanceView < handle
                 'Tag', 'AmacrineSynapseID');
             uicontrol(uiLayout,...
                 'Style', 'text',...
+                'String', [num2str(obj.amacrineAnnotations), ' locations'], ...
+                'Tag', 'NumLocations');
+            uicontrol(uiLayout,...
+                'Style', 'text',...
                 'Tag', 'SynapseNumber',...
                 'FontWeight', 'bold',...
                 'String', num2str(obj.currentSynapse));
@@ -187,6 +214,9 @@ classdef BipolarDistanceView < handle
                 uiLayout, 'Amacrine ID:',...
                 'Style', 'edit', 'String', '',...
                 'Callback', @obj.onEditAmacrineID);
+            uix.Empty('Parent', uiLayout,...
+                'BackgroundColor', 'w');
+            
             LayoutManager.verticalBoxWithLabel(...
                 uiLayout, 'Distance:',...
                 'Style', 'text', 'String', '',...
@@ -200,7 +230,7 @@ classdef BipolarDistanceView < handle
                 'Style', 'text', 'String', '',...
                 'Tag', 'LocationID');
             
-            set(uiLayout, 'Heights', [-1, -1, -1, -1, -1, -1, -1, -1, -1]);
+            % set(uiLayout, 'Heights', [-1, -1, -1, -1, -1, -1, -1, -1, -1]);
             
             % Set up the render display
             obj.neuron.render('ax', obj.axesHandle, ...
